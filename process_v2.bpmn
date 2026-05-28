@@ -1,0 +1,627 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:flowable="http://flowable.org/bpmn" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.45.0">
+  <bpmn:message id="Message_NewOrder" name="Message_NewOrder" />
+  <bpmn:message id="Message_Payment" name="Message_Payment" />
+  <bpmn:error id="Error_ShipmentFailed" name="Error_ShipmentFailed" errorCode="SHIPMENT_ERR" />
+  <bpmn:error id="Error_PreparationFailed" name="Error_PreparationFailed" errorCode="PREPARATION_ERR" />
+  <bpmn:collaboration id="Collaboration_164l1vl">
+    <bpmn:participant id="Participant_02ci955" name="klient" processRef="Process_1yjnjb7">
+      <bpmn:participantMultiplicity />
+    </bpmn:participant>
+    <bpmn:participant id="Participant_0rxtqax" processRef="Process_OrderTransport" />
+    <bpmn:messageFlow id="Flow_12rcqwn" sourceRef="Participant_02ci955" targetRef="Event_PaymentReceived" />
+    <bpmn:messageFlow id="Flow_0k6k6zf" sourceRef="Participant_02ci955" targetRef="StartEvent_OrderReceived" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_1yjnjb7" isExecutable="false" />
+  <bpmn:process id="Process_OrderTransport" name="Zamówienia i Transporty" isExecutable="true">
+    <bpmn:transaction id="Transaction_Shipment" name="Transakcja wysyłki">
+      <bpmn:incoming>Flow_PaymentValid</bpmn:incoming>
+      <bpmn:outgoing>Flow_TransactionToNotify</bpmn:outgoing>
+      <bpmn:endEvent id="CancelEnd_Transaction" name="Anulowanie transakcji&#10;(cofnięcie zadań)">
+        <bpmn:incoming>Flow_TxShipFailed</bpmn:incoming>
+        <bpmn:cancelEventDefinition id="CancelEndDef_Tx" />
+      </bpmn:endEvent>
+      <bpmn:serviceTask id="Task_UndoPrepare" name="Cofnięcie przygotowania przesyłki" isForCompensation="true" flowable:type="external" flowable:topic="undo-prepare-shipment" />
+      <bpmn:serviceTask id="Task_UndoShip" name="Cofnięcie wysyłki zamówienia" isForCompensation="true" flowable:type="external" flowable:topic="undo-ship-order" />
+      <bpmn:endEvent id="End_Transaction" name="Transakcja zakończona pomyślnie">
+        <bpmn:incoming>Flow_TxToEnd</bpmn:incoming>
+      </bpmn:endEvent>
+      <bpmn:userTask id="Task_ConfirmShipment" name="Potwierdzenie wysyłki" flowable:formKey="confirmShipmentForm" flowable:candidateGroups="warehouse">
+        <bpmn:incoming>Flow_TxShipOk</bpmn:incoming>
+        <bpmn:outgoing>Flow_TxToEnd</bpmn:outgoing>
+      </bpmn:userTask>
+      <bpmn:sequenceFlow id="Flow_TxToEnd" sourceRef="Task_ConfirmShipment" targetRef="End_Transaction" />
+      <bpmn:exclusiveGateway id="Gateway_ShipmentOk" name="Czy wysyłka poprawna?">
+        <bpmn:incoming>Flow_TxToGateway</bpmn:incoming>
+        <bpmn:outgoing>Flow_TxShipFailed</bpmn:outgoing>
+        <bpmn:outgoing>Flow_TxShipOk</bpmn:outgoing>
+      </bpmn:exclusiveGateway>
+      <bpmn:sequenceFlow id="Flow_TxShipFailed" name="Nie" sourceRef="Gateway_ShipmentOk" targetRef="CancelEnd_Transaction">
+        <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${shipmentValid == false}</bpmn:conditionExpression>
+      </bpmn:sequenceFlow>
+      <bpmn:sequenceFlow id="Flow_TxShipOk" name="Tak" sourceRef="Gateway_ShipmentOk" targetRef="Task_ConfirmShipment">
+        <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${shipmentValid == true}</bpmn:conditionExpression>
+      </bpmn:sequenceFlow>
+      <bpmn:serviceTask id="Task_ShipOrder" name="Wysyłka zamówienia" flowable:type="external" flowable:topic="ship-order">
+        <bpmn:incoming>Flow_TxToShip</bpmn:incoming>
+        <bpmn:outgoing>Flow_TxToGateway</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_TxToGateway" sourceRef="Task_ShipOrder" targetRef="Gateway_ShipmentOk" />
+      <bpmn:boundaryEvent id="BoundaryCompensation_Ship" name="Kompensacja wysyłki" attachedToRef="Task_ShipOrder">
+        <bpmn:compensateEventDefinition id="CompensateDef_Ship" />
+      </bpmn:boundaryEvent>
+      <bpmn:serviceTask id="Task_PrepareShipment" name="Przygotowanie przesyłki" flowable:type="external" flowable:topic="prepare-shipment">
+        <bpmn:incoming>Flow_TxToPrepare</bpmn:incoming>
+        <bpmn:outgoing>Flow_TxToShip</bpmn:outgoing>
+      </bpmn:serviceTask>
+      <bpmn:sequenceFlow id="Flow_TxToShip" sourceRef="Task_PrepareShipment" targetRef="Task_ShipOrder" />
+      <bpmn:boundaryEvent id="BoundaryCompensation_Prepare" name="Kompensacja przygotowania" attachedToRef="Task_PrepareShipment">
+        <bpmn:compensateEventDefinition id="CompensateDef_Prepare" />
+      </bpmn:boundaryEvent>
+      <bpmn:startEvent id="Start_Transaction" name="Początek transakcji">
+        <bpmn:outgoing>Flow_TxToPrepare</bpmn:outgoing>
+      </bpmn:startEvent>
+      <bpmn:sequenceFlow id="Flow_TxToPrepare" sourceRef="Start_Transaction" targetRef="Task_PrepareShipment" />
+      <bpmn:association id="Association_Ship" associationDirection="One" sourceRef="BoundaryCompensation_Ship" targetRef="Task_UndoShip" />
+      <bpmn:association id="Association_0g21rgq" associationDirection="One" sourceRef="BoundaryCompensation_Prepare" targetRef="Task_UndoPrepare" />
+    </bpmn:transaction>
+    <bpmn:endEvent id="EndEvent_TxError" name="Zamówienie nieudane&#10;(błąd wysyłki)">
+      <bpmn:incoming>Flow_ErrorTxToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ErrorTxToEnd" sourceRef="Task_HandleErrorTx" targetRef="EndEvent_TxError" />
+    <bpmn:serviceTask id="Task_HandleCancelledTx" name="Obsługa anulowanej transakcji&#10;(powiadomienie + cofnięcie)" flowable:type="external" flowable:topic="handle-cancelled-transaction">
+      <bpmn:incoming>Flow_TxCancelToCompensate</bpmn:incoming>
+      <bpmn:outgoing>Flow_07p3wsx</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_TxCancelToCompensate" sourceRef="BoundaryEvent_TxCancel" targetRef="Task_HandleCancelledTx" />
+    <bpmn:endEvent id="EndEvent_TxCancelled" name="Wysyłka anulowana&#10;(zadania cofnięte)">
+      <bpmn:incoming>Flow_07p3wsx</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_07p3wsx" sourceRef="Task_HandleCancelledTx" targetRef="EndEvent_TxCancelled" />
+    <bpmn:endEvent id="EndEvent_CancelTimeout" name="Zamówienie anulowane&#10;(timeout)">
+      <bpmn:incoming>Flow_ToEndCancelTimeout</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:intermediateCatchEvent id="Event_Timer" name="Termin upłynął&#10;(data transportu)">
+      <bpmn:incoming>Flow_ToTimerEvent</bpmn:incoming>
+      <bpmn:outgoing>Flow_TimerToCancel</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDef_Deadline">
+        <bpmn:timeDate xsi:type="bpmn:tFormalExpression">${estimatedTransportDate}</bpmn:timeDate>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="Flow_TimerToCancel" sourceRef="Event_Timer" targetRef="Task_CancelTimeout" />
+    <bpmn:serviceTask id="Task_CancelTimeout" name="Anulowanie zamówienia&#10;(brak płatności w terminie)" flowable:type="external" flowable:topic="cancel-order">
+      <bpmn:incoming>Flow_TimerToCancel</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndCancelTimeout</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEndCancelTimeout" sourceRef="Task_CancelTimeout" targetRef="EndEvent_CancelTimeout" />
+    <bpmn:sequenceFlow id="Flow_TransactionToNotify" sourceRef="Transaction_Shipment" targetRef="Task_NotifyDelivery" />
+    <bpmn:exclusiveGateway id="Gateway_PaymentValid" name="Czy płatność prawidłowa?">
+      <bpmn:incoming>Flow_ToPaymentCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_PaymentInvalid</bpmn:outgoing>
+      <bpmn:outgoing>Flow_PaymentValid</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_PaymentInvalid" name="Nie" sourceRef="Gateway_PaymentValid" targetRef="Task_CancelInvalidPayment">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${paymentValid == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_PaymentValid" name="Tak" sourceRef="Gateway_PaymentValid" targetRef="Transaction_Shipment">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${paymentValid == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:intermediateCatchEvent id="Event_PaymentReceived" name="Płatność otrzymana">
+      <bpmn:incoming>Flow_ToPaymentMessage</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPaymentCheck</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageEventDef_Payment" messageRef="Message_Payment" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:sequenceFlow id="Flow_ToPaymentCheck" sourceRef="Event_PaymentReceived" targetRef="Gateway_PaymentValid" />
+    <bpmn:eventBasedGateway id="Gateway_EventBased" name="Oczekiwanie na płatność">
+      <bpmn:incoming>Flow_ToEventGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPaymentMessage</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToTimerEvent</bpmn:outgoing>
+    </bpmn:eventBasedGateway>
+    <bpmn:sequenceFlow id="Flow_ToPaymentMessage" sourceRef="Gateway_EventBased" targetRef="Event_PaymentReceived" />
+    <bpmn:sequenceFlow id="Flow_ToTimerEvent" sourceRef="Gateway_EventBased" targetRef="Event_Timer" />
+    <bpmn:sendTask id="Task_SendQuote" name="Wysłanie wyceny do klienta&#10;(email)" flowable:type="mail">
+      <bpmn:extensionElements>
+        <flowable:field name="to">
+          <flowable:expression>${customerEmail}</flowable:expression>
+        </flowable:field>
+        <flowable:field name="subject">
+          <flowable:string>Wycena zamówienia nr ${orderId}</flowable:string>
+        </flowable:field>
+        <flowable:field name="text">
+          <flowable:expression>Szanowny Kliencie, przesyłamy wycenę zamówienia nr ${orderId}. Kwota: ${totalPrice} PLN. Termin płatności: ${paymentDeadline}.</flowable:expression>
+        </flowable:field>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToSendQuote</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEventGateway</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:sequenceFlow id="Flow_ToEventGateway" sourceRef="Task_SendQuote" targetRef="Gateway_EventBased" />
+    <bpmn:serviceTask id="Task_CalculatePrice" name="Wycena zamówienia&#10;(produkty + transport)" flowable:type="external" flowable:topic="calculate-price">
+      <bpmn:incoming>Flow_ToCalculatePrice</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToSendQuote</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToSendQuote" sourceRef="Task_CalculatePrice" targetRef="Task_SendQuote" />
+    <bpmn:exclusiveGateway id="Gateway_Merge" name="Scalenie ścieżek">
+      <bpmn:incoming>Flow_EstimateToMerge</bpmn:incoming>
+      <bpmn:incoming>Flow_DeliveryToMerge</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCalculatePrice</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_ToCalculatePrice" sourceRef="Gateway_Merge" targetRef="Task_CalculatePrice" />
+    <bpmn:serviceTask id="Task_EstimateTransportDate" name="Szacowanie daty transportu&#10;(data wyjazdu, data dostarczenia)" flowable:type="external" flowable:topic="estimate-transport-date">
+      <bpmn:incoming>Flow_ToEstimateDate</bpmn:incoming>
+      <bpmn:outgoing>Flow_EstimateToMerge</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_EstimateToMerge" sourceRef="Task_EstimateTransportDate" targetRef="Gateway_Merge" />
+    <bpmn:serviceTask id="Task_StartProduction" name="Rozpoczęcie produkcji brakujących towarów" flowable:type="external" flowable:topic="start-production">
+      <bpmn:incoming>Flow_NotAllInStock</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEstimateDate</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToEstimateDate" sourceRef="Task_StartProduction" targetRef="Task_EstimateTransportDate" />
+    <bpmn:serviceTask id="Task_DefineDeliveryTime" name="Określenie czasu dostawy&#10;(data wyjazdu, data dostarczenia)" flowable:type="external" flowable:topic="define-delivery-time">
+      <bpmn:incoming>Flow_AllInStock</bpmn:incoming>
+      <bpmn:outgoing>Flow_DeliveryToMerge</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_DeliveryToMerge" sourceRef="Task_DefineDeliveryTime" targetRef="Gateway_Merge" />
+    <bpmn:exclusiveGateway id="Gateway_StockCheck" name="Czy wszystkie towary dostępne?">
+      <bpmn:incoming>Flow_ToStockGateway</bpmn:incoming>
+      <bpmn:outgoing>Flow_NotAllInStock</bpmn:outgoing>
+      <bpmn:outgoing>Flow_AllInStock</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:sequenceFlow id="Flow_NotAllInStock" name="Nie" sourceRef="Gateway_StockCheck" targetRef="Task_StartProduction">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${allItemsInStock == false}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_AllInStock" name="Tak" sourceRef="Gateway_StockCheck" targetRef="Task_DefineDeliveryTime">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">${allItemsInStock == true}</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:serviceTask id="Task_CheckStock" name="Sprawdzenie dostępności na magazynie" flowable:type="external" flowable:topic="check-stock">
+      <bpmn:incoming>Flow_AutoApproveToCheckStock</bpmn:incoming>
+      <bpmn:incoming>Flow_ToCheckStock</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToStockGateway</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToStockGateway" sourceRef="Task_CheckStock" targetRef="Gateway_StockCheck" />
+    <bpmn:serviceTask id="Task_AutoApprove" name="Automatyczne zatwierdzenie&#10;(eskalacja)" flowable:type="external" flowable:topic="auto-approve">
+      <bpmn:incoming>Flow_TimerVerifyToEscalation</bpmn:incoming>
+      <bpmn:outgoing>Flow_AutoApproveToCheckStock</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_AutoApproveToCheckStock" sourceRef="Task_AutoApprove" targetRef="Task_CheckStock" />
+    <bpmn:userTask id="Task_VerifyOrder" name="Weryfikacja zamówienia" flowable:formKey="verifyOrderForm" flowable:assignee="${initiator}">
+      <bpmn:incoming>Flow_ToVerify</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToCheckStock</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_ToCheckStock" sourceRef="Task_VerifyOrder" targetRef="Task_CheckStock" />
+    <bpmn:boundaryEvent id="BoundaryTimer_Verify" name="Timeout weryfikacji&#10;(PT20S)" attachedToRef="Task_VerifyOrder">
+      <bpmn:outgoing>Flow_TimerVerifyToEscalation</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerDef_BoundaryVerify">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT20S</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_TimerVerifyToEscalation" sourceRef="BoundaryTimer_Verify" targetRef="Task_AutoApprove" />
+    <bpmn:serviceTask id="Task_RegisterOrder" name="Rejestracja zamówienia" flowable:type="external" flowable:topic="register-order">
+      <bpmn:incoming>Flow_ToRegister</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToVerify</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_ToVerify" sourceRef="Task_RegisterOrder" targetRef="Task_VerifyOrder" />
+    <bpmn:startEvent id="StartEvent_OrderReceived" name="Zamówienie otrzymane">
+      <bpmn:outgoing>Flow_ToRegister</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageEventDef_Order" messageRef="Message_NewOrder" />
+    </bpmn:startEvent>
+    <bpmn:sequenceFlow id="Flow_ToRegister" sourceRef="StartEvent_OrderReceived" targetRef="Task_RegisterOrder" />
+    <bpmn:sequenceFlow id="Flow_0owb9ry" sourceRef="BoundaryEvent_TxError" targetRef="Task_HandleErrorTx" />
+    <bpmn:boundaryEvent id="BoundaryEvent_TxError" name="Błąd wysyłki" attachedToRef="Transaction_Shipment">
+      <bpmn:outgoing>Flow_0owb9ry</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDef_Tx" errorRef="Error_ShipmentFailed" />
+    </bpmn:boundaryEvent>
+    <bpmn:boundaryEvent id="BoundaryEvent_TxCancel" name="Anulowanie transakcji&#10;(cancel)" attachedToRef="Transaction_Shipment">
+      <bpmn:outgoing>Flow_TxCancelToCompensate</bpmn:outgoing>
+      <bpmn:cancelEventDefinition id="CancelEventDef_Tx" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_CancelInvalidPayment" name="Anulowanie przygotowań&#10;(płatność nieprawidłowa)" flowable:type="external" flowable:topic="cancel-order">
+      <bpmn:incoming>Flow_PaymentInvalid</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndCancelPayment</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="EndEvent_CancelPayment" name="Zamówienie anulowane&#10;(płatność)">
+      <bpmn:incoming>Flow_ToEndCancelPayment</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_ToEndCancelPayment" sourceRef="Task_CancelInvalidPayment" targetRef="EndEvent_CancelPayment" />
+    <bpmn:endEvent id="EndEvent_Success" name="Zamówienie zrealizowane">
+      <bpmn:incoming>Flow_ToEndSuccess</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sendTask id="Task_NotifyDelivery" name="Powiadomienie klienta o wysyłce&#10;(email)" flowable:type="mail">
+      <bpmn:extensionElements>
+        <flowable:field name="to">
+          <flowable:expression>${customerEmail}</flowable:expression>
+        </flowable:field>
+        <flowable:field name="subject">
+          <flowable:string>Wysyłka zamówienia nr ${orderId}</flowable:string>
+        </flowable:field>
+        <flowable:field name="text">
+          <flowable:expression>Szanowny Kliencie, Twoje zamówienie nr ${orderId} zostało wysłane. Przewidywana data dostawy: ${deliveryDate}.</flowable:expression>
+        </flowable:field>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_TransactionToNotify</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEndSuccess</bpmn:outgoing>
+    </bpmn:sendTask>
+    <bpmn:sequenceFlow id="Flow_ToEndSuccess" sourceRef="Task_NotifyDelivery" targetRef="EndEvent_Success" />
+    <bpmn:serviceTask id="Task_HandleErrorTx" name="Obsługa błędu wysyłki&#10;(logowanie + powiadomienie)" flowable:type="external" flowable:topic="handle-shipment-error">
+      <bpmn:incoming>Flow_0owb9ry</bpmn:incoming>
+      <bpmn:outgoing>Flow_ErrorTxToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_164l1vl">
+      <bpmndi:BPMNShape id="Participant_0rxtqax_di" bpmnElement="Participant_0rxtqax" isHorizontal="true">
+        <dc:Bounds x="129" y="240" width="2749" height="610" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_OrderReceived_di" bpmnElement="StartEvent_OrderReceived">
+        <dc:Bounds x="179" y="409" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="167" y="452" width="60" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RegisterOrder_di" bpmnElement="Task_RegisterOrder">
+        <dc:Bounds x="260" y="387" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_VerifyOrder_di" bpmnElement="Task_VerifyOrder">
+        <dc:Bounds x="410" y="387" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AutoApprove_di" bpmnElement="Task_AutoApprove">
+        <dc:Bounds x="410" y="530" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CheckStock_di" bpmnElement="Task_CheckStock">
+        <dc:Bounds x="560" y="387" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_StockCheck_di" bpmnElement="Gateway_StockCheck" isMarkerVisible="true">
+        <dc:Bounds x="715" y="402" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="776" y="412" width="87" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_DefineDeliveryTime_di" bpmnElement="Task_DefineDeliveryTime">
+        <dc:Bounds x="820" y="297" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_StartProduction_di" bpmnElement="Task_StartProduction">
+        <dc:Bounds x="820" y="497" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_EstimateTransportDate_di" bpmnElement="Task_EstimateTransportDate">
+        <dc:Bounds x="970" y="497" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Merge_di" bpmnElement="Gateway_Merge" isMarkerVisible="true">
+        <dc:Bounds x="1115" y="402" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1028" y="419" width="83" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CalculatePrice_di" bpmnElement="Task_CalculatePrice">
+        <dc:Bounds x="1210" y="387" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_SendQuote_di" bpmnElement="Task_SendQuote">
+        <dc:Bounds x="1360" y="387" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_EventBased_di" bpmnElement="Gateway_EventBased">
+        <dc:Bounds x="1515" y="402" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1561" y="412" width="78" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_PaymentReceived_di" bpmnElement="Event_PaymentReceived">
+        <dc:Bounds x="1582" y="302" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1574" y="345" width="52" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_PaymentValid_di" bpmnElement="Gateway_PaymentValid" isMarkerVisible="true">
+        <dc:Bounds x="1665" y="295" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1700" y="345" width="64" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CancelTimeout_di" bpmnElement="Task_CancelTimeout">
+        <dc:Bounds x="1640" y="710" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_Timer_di" bpmnElement="Event_Timer">
+        <dc:Bounds x="1572" y="732" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1549" y="781" width="82" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_CancelTimeout_di" bpmnElement="EndEvent_CancelTimeout">
+        <dc:Bounds x="1792" y="732" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1780" y="775" width="60" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_TxCancelled_di" bpmnElement="EndEvent_TxCancelled">
+        <dc:Bounds x="2702" y="742" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2676" y="785" width="88" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_HandleCancelledTx_di" bpmnElement="Task_HandleCancelledTx">
+        <dc:Bounds x="2210" y="720" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_TxError_di" bpmnElement="EndEvent_TxError">
+        <dc:Bounds x="2702" y="642" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2687" y="685" width="67" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CancelInvalidPayment_di" bpmnElement="Task_CancelInvalidPayment">
+        <dc:Bounds x="1640" y="590" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_CancelPayment_di" bpmnElement="EndEvent_CancelPayment">
+        <dc:Bounds x="1792" y="612" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1780" y="655" width="60" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="EndEvent_Success_di" bpmnElement="EndEvent_Success">
+        <dc:Bounds x="2742" y="302" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2727" y="346" width="65" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_NotifyDelivery_di" bpmnElement="Task_NotifyDelivery">
+        <dc:Bounds x="2590" y="280" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_HandleErrorTx_di" bpmnElement="Task_HandleErrorTx">
+        <dc:Bounds x="2490" y="620" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Transaction_Shipment_di" bpmnElement="Transaction_Shipment" isExpanded="true">
+        <dc:Bounds x="1780" y="250" width="760" height="332" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="CancelEnd_Transaction_di" bpmnElement="CancelEnd_Transaction">
+        <dc:Bounds x="2262" y="422" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2238" y="458" width="85" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_UndoShip_di" bpmnElement="Task_UndoShip">
+        <dc:Bounds x="2060" y="460" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Transaction_di" bpmnElement="End_Transaction">
+        <dc:Bounds x="2442" y="322" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2431" y="370" width="59" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ConfirmShipment_di" bpmnElement="Task_ConfirmShipment">
+        <dc:Bounds x="2230" y="300" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ShipmentOk_di" bpmnElement="Gateway_ShipmentOk" isMarkerVisible="true">
+        <dc:Bounds x="2145" y="315" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2140" y="285" width="61" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ShipOrder_di" bpmnElement="Task_ShipOrder">
+        <dc:Bounds x="2010" y="300" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_PrepareShipment_di" bpmnElement="Task_PrepareShipment">
+        <dc:Bounds x="1870" y="300" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Transaction_di" bpmnElement="Start_Transaction">
+        <dc:Bounds x="1800" y="322" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1795" y="292" width="47" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_UndoPrepare_di" bpmnElement="Task_UndoPrepare">
+        <dc:Bounds x="1920" y="470" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Association_Ship_di" bpmnElement="Association_Ship">
+        <di:waypoint x="2118" y="396" />
+        <di:waypoint x="2120" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_0g21rgq_di" bpmnElement="Association_0g21rgq">
+        <di:waypoint x="1970" y="398" />
+        <di:waypoint x="1970" y="470" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="BoundaryCompensation_Ship_di" bpmnElement="BoundaryCompensation_Ship">
+        <dc:Bounds x="2092" y="362" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2036" y="406" width="67" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryCompensation_Prepare_di" bpmnElement="BoundaryCompensation_Prepare">
+        <dc:Bounds x="1952" y="362" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1894" y="398" width="72" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_TxShipFailed_di" bpmnElement="Flow_TxShipFailed">
+        <di:waypoint x="2170" y="365" />
+        <di:waypoint x="2170" y="440" />
+        <di:waypoint x="2262" y="440" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2182" y="422" width="17" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxToEnd_di" bpmnElement="Flow_TxToEnd">
+        <di:waypoint x="2330" y="340" />
+        <di:waypoint x="2442" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxShipOk_di" bpmnElement="Flow_TxShipOk">
+        <di:waypoint x="2195" y="340" />
+        <di:waypoint x="2230" y="340" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2203" y="322" width="19" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxToGateway_di" bpmnElement="Flow_TxToGateway">
+        <di:waypoint x="2110" y="340" />
+        <di:waypoint x="2145" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxToShip_di" bpmnElement="Flow_TxToShip">
+        <di:waypoint x="1970" y="340" />
+        <di:waypoint x="2010" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxToPrepare_di" bpmnElement="Flow_TxToPrepare">
+        <di:waypoint x="1836" y="340" />
+        <di:waypoint x="1870" y="340" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="BoundaryTimer_Verify_di" bpmnElement="BoundaryTimer_Verify">
+        <dc:Bounds x="442" y="449" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="488" y="480" width="50" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryEvent_TxError_di" bpmnElement="BoundaryEvent_TxError">
+        <dc:Bounds x="2522" y="564" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2568" y="575" width="60" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="BoundaryEvent_TxCancel_di" bpmnElement="BoundaryEvent_TxCancel">
+        <dc:Bounds x="2112" y="564" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2151" y="600" width="57" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_ToRegister_di" bpmnElement="Flow_ToRegister">
+        <di:waypoint x="215" y="427" />
+        <di:waypoint x="260" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToVerify_di" bpmnElement="Flow_ToVerify">
+        <di:waypoint x="360" y="427" />
+        <di:waypoint x="410" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToCheckStock_di" bpmnElement="Flow_ToCheckStock">
+        <di:waypoint x="510" y="427" />
+        <di:waypoint x="560" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TimerVerifyToEscalation_di" bpmnElement="Flow_TimerVerifyToEscalation">
+        <di:waypoint x="460" y="485" />
+        <di:waypoint x="460" y="530" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AutoApproveToCheckStock_di" bpmnElement="Flow_AutoApproveToCheckStock">
+        <di:waypoint x="510" y="570" />
+        <di:waypoint x="610" y="570" />
+        <di:waypoint x="610" y="467" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToStockGateway_di" bpmnElement="Flow_ToStockGateway">
+        <di:waypoint x="660" y="427" />
+        <di:waypoint x="715" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_AllInStock_di" bpmnElement="Flow_AllInStock">
+        <di:waypoint x="740" y="402" />
+        <di:waypoint x="740" y="337" />
+        <di:waypoint x="820" y="337" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="761" y="319" width="19" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_NotAllInStock_di" bpmnElement="Flow_NotAllInStock">
+        <di:waypoint x="740" y="452" />
+        <di:waypoint x="740" y="537" />
+        <di:waypoint x="820" y="537" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="762" y="519" width="17" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_DeliveryToMerge_di" bpmnElement="Flow_DeliveryToMerge">
+        <di:waypoint x="920" y="337" />
+        <di:waypoint x="1140" y="337" />
+        <di:waypoint x="1140" y="402" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEstimateDate_di" bpmnElement="Flow_ToEstimateDate">
+        <di:waypoint x="920" y="537" />
+        <di:waypoint x="970" y="537" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_EstimateToMerge_di" bpmnElement="Flow_EstimateToMerge">
+        <di:waypoint x="1070" y="537" />
+        <di:waypoint x="1140" y="537" />
+        <di:waypoint x="1140" y="452" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToCalculatePrice_di" bpmnElement="Flow_ToCalculatePrice">
+        <di:waypoint x="1165" y="427" />
+        <di:waypoint x="1210" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToSendQuote_di" bpmnElement="Flow_ToSendQuote">
+        <di:waypoint x="1310" y="427" />
+        <di:waypoint x="1360" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEventGateway_di" bpmnElement="Flow_ToEventGateway">
+        <di:waypoint x="1460" y="427" />
+        <di:waypoint x="1515" y="427" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToTimerEvent_di" bpmnElement="Flow_ToTimerEvent">
+        <di:waypoint x="1540" y="452" />
+        <di:waypoint x="1540" y="750" />
+        <di:waypoint x="1572" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPaymentMessage_di" bpmnElement="Flow_ToPaymentMessage">
+        <di:waypoint x="1540" y="402" />
+        <di:waypoint x="1540" y="320" />
+        <di:waypoint x="1582" y="320" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPaymentCheck_di" bpmnElement="Flow_ToPaymentCheck">
+        <di:waypoint x="1618" y="320" />
+        <di:waypoint x="1665" y="320" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PaymentValid_di" bpmnElement="Flow_PaymentValid">
+        <di:waypoint x="1715" y="320" />
+        <di:waypoint x="1780" y="320" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1735" y="302" width="19" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_PaymentInvalid_di" bpmnElement="Flow_PaymentInvalid">
+        <di:waypoint x="1690" y="345" />
+        <di:waypoint x="1690" y="590" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1692" y="433" width="17" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TransactionToNotify_di" bpmnElement="Flow_TransactionToNotify">
+        <di:waypoint x="2540" y="320" />
+        <di:waypoint x="2590" y="320" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TxCancelToCompensate_di" bpmnElement="Flow_TxCancelToCompensate">
+        <di:waypoint x="2130" y="600" />
+        <di:waypoint x="2130" y="760" />
+        <di:waypoint x="2210" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_TimerToCancel_di" bpmnElement="Flow_TimerToCancel">
+        <di:waypoint x="1608" y="750" />
+        <di:waypoint x="1640" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndCancelTimeout_di" bpmnElement="Flow_ToEndCancelTimeout">
+        <di:waypoint x="1740" y="750" />
+        <di:waypoint x="1792" y="750" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_07p3wsx_di" bpmnElement="Flow_07p3wsx">
+        <di:waypoint x="2310" y="760" />
+        <di:waypoint x="2702" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ErrorTxToEnd_di" bpmnElement="Flow_ErrorTxToEnd">
+        <di:waypoint x="2590" y="660" />
+        <di:waypoint x="2702" y="660" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0owb9ry_di" bpmnElement="Flow_0owb9ry">
+        <di:waypoint x="2540" y="600" />
+        <di:waypoint x="2540" y="620" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndCancelPayment_di" bpmnElement="Flow_ToEndCancelPayment">
+        <di:waypoint x="1740" y="630" />
+        <di:waypoint x="1792" y="630" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEndSuccess_di" bpmnElement="Flow_ToEndSuccess">
+        <di:waypoint x="2690" y="320" />
+        <di:waypoint x="2742" y="320" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="Participant_02ci955_di" bpmnElement="Participant_02ci955" isHorizontal="true">
+        <dc:Bounds x="129" y="80" width="2749" height="120" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0k6k6zf_di" bpmnElement="Flow_0k6k6zf">
+        <di:waypoint x="197" y="200" />
+        <di:waypoint x="197" y="409" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_12rcqwn_di" bpmnElement="Flow_12rcqwn">
+        <di:waypoint x="1600" y="200" />
+        <di:waypoint x="1600" y="302" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
