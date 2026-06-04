@@ -18,10 +18,16 @@ class Message:
 
 @dataclass(slots=True)
 class Order:
-    # Minimalna reprezentacja zamówienia na potrzeby sprintu 1.
-    # W kolejnych sprintach ten model można rozszerzyć np. o termin,
-    # listę produktów, status płatności albo etap produkcji.
+    # Reprezentacja zamówienia rozszerzona o stan podprocesu Produkcja.
     order_id: int
     customer_name: str
     total_value: float
     status: str = "new"
+    # Etap podprocesu produkcji (None = produkcja nierozpoczęta)
+    production_stage: str | None = None
+    # Flaga: czy surowce zostały zamówione (boundary event)
+    materials_ordered: bool = False
+    # Flaga: czy wystąpiło wstrzymanie produkcji
+    production_halted: bool = False
+    # Szacowana data dostawy (ustawiana po oszacowaniu)
+    estimated_delivery: str | None = None

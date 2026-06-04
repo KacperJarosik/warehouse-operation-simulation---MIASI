@@ -4,6 +4,7 @@ from tkinter import messagebox, ttk
 
 from models import Message, Order
 from network import DEFAULT_HOST, DEFAULT_PORT, LineSocketReader, send_message
+from production import ProductionProcess
 
 
 class ServerApp:
@@ -12,12 +13,13 @@ class ServerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("MIASI - Serwer")
-        self.root.geometry("980x620")
+        self.root.geometry("1100x720")
 
         self.server_socket: socket.socket | None = None
         self.client_socket: socket.socket | None = None
         self.reader: LineSocketReader | None = None
         self.orders: dict[int, Order] = {}
+        self.productions: dict[int, ProductionProcess] = {}
         self.selected_order_id: int | None = None
 
         self.host_var = tk.StringVar(value=DEFAULT_HOST)
@@ -72,9 +74,14 @@ class ServerApp:
         actions = ttk.LabelFrame(content, text="Akcje serwera", padding=12)
         actions.grid(row=0, column=1, sticky="nsew")
 
+        ttk.Label(actions, text="Podproces Produkcja:", font=("Segoe UI", 9, "bold")).pack(fill="x", pady=(0, 4))
+        ttk.Button(actions, text="Uruchom produkcję (cały podproces)", command=self.run_production).pack(fill="x", pady=(0, 8))
+
+        ttk.Separator(actions, orient="horizontal").pack(fill="x", pady=8)
+        ttk.Label(actions, text="Akcje po produkcji:", font=("Segoe UI", 9, "bold")).pack(fill="x", pady=(0, 4))
         ttk.Button(actions, text="Przygotuj wycenę", command=self.send_quote).pack(fill="x", pady=(0, 8))
         ttk.Button(actions, text="Potwierdź wysyłkę", command=self.send_shipment).pack(fill="x", pady=(0, 8))
-        ttk.Button(actions, text="Symuluj opóźnienie", command=self.send_delay_notice).pack(fill="x")
+        ttk.Button(actions, text="Symuluj opóźnienie (ręcznie)", command=self.send_delay_notice).pack(fill="x")
 
         log_frame = ttk.LabelFrame(actions, text="Log serwera", padding=12)
         log_frame.pack(fill="both", expand=True, pady=(16, 0))
@@ -164,6 +171,65 @@ class ServerApp:
             decision = "kontynuacja" if continue_order else "anulowanie"
             self._append_log(f"Serwer: klient odpowiedział '{decision}' dla zamówienia {order_id}.")
 
+            # Obsługa decyzji klienta w kontekście podprocesu Produkcja
+            production = self.productions.get(order_id)
+            if production is not None and production.order.production_stage == "waiting_client":
+                results = production.handle_client_decision(continue_order)
+                for r in results:
+                    self._append_log(f"  [Produkcja] {r.message}")
+                self._refresh_orders()
+                # Jeśli produkcja zakończona sukcesem, automatycznie wysyłamy wycenę
+                if production.order.status == "production_done":
+                    self._append_log(f"Serwer: produkcja zakończona - zamówienie {order_id} gotowe do wyceny.")
+                elif production.order.status == "cancelled":
+                    self._append_log(f"Serwer: zamówienie {order_id} anulowane przez klienta.")
+
+    def run_production(self) -> None:
+        # Uruchamia cały podproces Produkcja z BPMN dla wybranego zamówienia.
+        order = self._selected_order()
+        if order is None:
+            return
+
+        if order.production_stage == "completed":
+            messagebox.showinfo("Informacja", "Produkcja już zakończona dla tego zamówienia.")
+            return
+        if order.production_stage == "waiting_client":
+            messagebox.showinfo("Informacja", "Oczekiwanie na decyzję klienta - użyj przycisków w aplikacji klienta.")
+            return
+
+        # Tworzymy lub pobieramy proces produkcji
+        if order.order_id not in self.productions:
+            self.productions[order.order_id] = ProductionProcess(order)
+
+        production = self.productions[order.order_id]
+        self._append_log(f"--- Podproces PRODUKCJA dla zamówienia {order.order_id} ---")
+
+        results = production.start()
+
+        for r in results:
+            prefix = "✓" if r.success else "✗"
+            self._append_log(f"  {prefix} {r.message}")
+
+        self._refresh_orders()
+
+        # Sprawdzamy końcowy stan
+        if order.status == "awaiting_client_decision":
+            # Trzeba poinformować klienta o opóźnieniu
+            self._append_log(f"Serwer: wysyłam informację o opóźnieniu do klienta...")
+            if self.client_socket is not None:
+                self._send(
+                    Message(
+                        sender="server",
+                        receiver="client",
+                        event="delay_notice",
+                        payload={"order_id": order.order_id},
+                    )
+                )
+            self._append_log(f"Serwer: oczekiwanie na decyzję klienta (kontynuacja/anulowanie).")
+        elif order.status == "production_done":
+            self._append_log(f"Serwer: podproces Produkcja zakończony sukcesem.")
+            self._append_log(f"Serwer: zamówienie {order.order_id} gotowe do wyceny (kliknij 'Przygotuj wycenę').")
+
     def send_quote(self) -> None:
         # Akcja ręczna po stronie serwera: przygotowanie i wysłanie wyceny.
         order = self._selected_order()
@@ -177,7 +243,11 @@ class ServerApp:
                 sender="server",
                 receiver="client",
                 event="quote_ready",
-                payload={"order_id": order.order_id, "total_value": order.total_value},
+                payload={
+                    "order_id": order.order_id,
+                    "total_value": order.total_value,
+                    "estimated_delivery": order.estimated_delivery or "nieznana",
+                },
             )
         ):
             return
@@ -279,9 +349,16 @@ class ServerApp:
             self.order_details_var.set("Brak zamówienia")
             return
         order = self.orders[self.selected_order_id]
-        self.order_details_var.set(
-            f"ID: {order.order_id}\nKlient: {order.customer_name}\nKwota: {order.total_value:.2f} PLN\nStatus: {order.status}"
+        details = (
+            f"ID: {order.order_id}\n"
+            f"Klient: {order.customer_name}\n"
+            f"Kwota: {order.total_value:.2f} PLN\n"
+            f"Status: {order.status}\n"
+            f"Etap produkcji: {order.production_stage or 'brak'}\n"
+            f"Surowce zamówione: {'tak' if order.materials_ordered else 'nie'}\n"
+            f"Szac. dostawa: {order.estimated_delivery or 'brak'}"
         )
+        self.order_details_var.set(details)
 
     def _handle_disconnect(self) -> None:
         # Po rozłączeniu wracamy do stanu gotowości na następnego klienta.

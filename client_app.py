@@ -193,13 +193,28 @@ class ClientApp:
         order_id = message.payload.get("order_id", "?")
         if message.event == "quote_ready":
             total_value = float(message.payload["total_value"])
-            self._append_log(f"Klient: otrzymano wycenę dla zamówienia {order_id} na kwotę {total_value:.2f} PLN.")
+            estimated_delivery = message.payload.get("estimated_delivery", "nieznana")
+            self._append_log(
+                f"Klient: otrzymano wycenę dla zamówienia {order_id} na kwotę {total_value:.2f} PLN "
+                f"(szac. dostawa: {estimated_delivery})."
+            )
             return
         if message.event == "shipment_sent":
             self._append_log(f"Klient: otrzymano informację o wysyłce zamówienia {order_id}.")
             return
         if message.event == "delay_notice":
-            self._append_log(f"Klient: otrzymano informację o opóźnieniu dla zamówienia {order_id}.")
+            self._append_log(
+                f"Klient: UWAGA! Opóźnienie realizacji zamówienia {order_id}. "
+                f"Użyj przycisków 'Kontynuuj' lub 'Anuluj' aby odpowiedzieć."
+            )
+            return
+        if message.event == "order_cancelled":
+            reason = message.payload.get("reason", "nieznany powód")
+            self._append_log(f"Klient: zamówienie {order_id} zostało ANULOWANE. Powód: {reason}.")
+            return
+        if message.event == "production_status":
+            status = message.payload.get("status", "")
+            self._append_log(f"Klient: status produkcji zamówienia {order_id}: {status}.")
 
     def _handle_disconnect(self) -> None:
         # Sprzątanie po utracie połączenia jest wykonywane bezpiecznie
